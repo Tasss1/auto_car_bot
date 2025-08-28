@@ -26,10 +26,10 @@ class Car(models.Model):
     condition = models.CharField(max_length=10, choices=CONDITION_CHOICES)
     color = models.CharField(max_length=10, choices=COLOR_CHOICES)
     body_type = models.CharField(max_length=15, choices=BODY_TYPE_CHOICES)
-    price_range = models.CharField(max_length=50)
+    price = models.IntegerField()  # 👈 число вместо строки
     name = models.CharField(max_length=100)
     description = models.TextField()
-    image_url = models.URLField('Ссылка на фото', blank=True, null=True, help_text='URL изображения автомобиля')
+    image_url = models.URLField('Ссылка на фото', blank=True, null=True)
 
     def __str__(self):
-        return f"{self.name} - {self.get_condition_display()}"
+        return f"{self.name} ({self.get_condition_display()} - {self.price}$)"

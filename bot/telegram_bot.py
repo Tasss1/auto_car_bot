@@ -1,200 +1,176 @@
 import os
 import django
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, ConversationHandler, MessageHandler, filters, ContextTypes
 from asgiref.sync import sync_to_async
+from telegram.ext import (
+    Application, CommandHandler, ConversationHandler,
+    MessageHandler, filters, ContextTypes
+)
 from django.conf import settings
 
 # Настройка Django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'car_bot.settings')
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "car_bot.settings")
 django.setup()
 
 from bot.models import Car
 
-# Состояния разговора
-CONDITION, COLOR, BODY_TYPE, PRICE_RANGE, RESULTS = range(5)
+# Состояния
+CONDITION, COLOR, BODY_TYPE, PRICE_RANGE = range(4)
 
-# Клавиатуры
-condition_keyboard = [['Новый', 'Б/У']]
-color_keyboard = [['Красный', 'Черный'], ['Синий', 'Зеленый'], ['Желтый']]
-body_keyboard = [['Седан', 'Внедорожник'], ['Хэтчбек', 'Купе'], ['Минивэн']]
-
-price_ranges = [
-    '5000$ - 10000$',
-    '10000$ - 15000$',
-    '15000$ - 20000$',
-    '20000$ - 30000$',
-    '30000$ - 40000$',
-    '40000$ - 60000$'
+# Диапазоны цен
+PRICE_RANGES = [
+    (5000, 10000),
+    (10000, 15000),
+    (15000, 20000),
+    (20000, 30000),
+    (30000, 40000),
+    (40000, 60000),
 ]
-price_keyboard = [price_ranges[i:i + 2] for i in range(0, len(price_ranges), 2)]
 
+def chunk(lst, n):
+    """Разбить список на строки по n элементов для клавиатуры."""
+    return [lst[i:i + n] for i in range(0, len(lst), n)]
 
+# ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [["Новый"], ["Б/У"]]
     await update.message.reply_text(
-        'Добро пожаловать в бот по подбору автомобилей! 🚗\n\n'
-        'Я помогу вам найти подходящий автомобиль по вашим предпочтениям.',
-        reply_markup=ReplyKeyboardMarkup(condition_keyboard, one_time_keyboard=True)
+        "Добро пожаловать в бот по подбору автомобилей! 🚗\n\n"
+        "Выберите состояние автомобиля:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
     return CONDITION
 
-
+# ===== CONDITION HANDLER =====
 async def condition_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    condition = update.message.text.lower()
-    if condition not in ['новый', 'б/у']:
-        await update.message.reply_text(
-            'Пожалуйста, выберите вариант из клавиатуры.',
-            reply_markup=ReplyKeyboardMarkup(condition_keyboard, one_time_keyboard=True)
-        )
+    text = (update.message.text or "").strip().lower()
+    if text not in ["новый", "б/у"]:
+        await update.message.reply_text("Пожалуйста, выберите один из вариантов кнопками.")
         return CONDITION
 
-    context.user_data['condition'] = 'new' if condition == 'новый' else 'used'
+    context.user_data["condition"] = "new" if text == "новый" else "used"
 
+    # Кнопки с цветами
+    color_buttons = chunk([v for _, v in Car.COLOR_CHOICES], 2)
     await update.message.reply_text(
-        'Отлично! Теперь выберите цвет автомобиля:',
-        reply_markup=ReplyKeyboardMarkup(color_keyboard, one_time_keyboard=True)
+        "🎨 Выберите цвет:",
+        reply_markup=ReplyKeyboardMarkup(color_buttons, one_time_keyboard=True, resize_keyboard=True)
     )
     return COLOR
 
-
+# ===== COLOR HANDLER =====
 async def color_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    color_mapping = {
-        'красный': 'red',
-        'черный': 'black',
-        'синий': 'blue',
-        'зеленый': 'green',
-        'желтый': 'yellow'
-    }
+    color_text = (update.message.text or "").strip().lower()
+    reverse_colors = {v.lower(): k for k, v in Car.COLOR_CHOICES}
 
-    color = update.message.text.lower()
-    if color not in color_mapping:
+    if color_text not in reverse_colors:
+        color_buttons = chunk([v for _, v in Car.COLOR_CHOICES], 2)
         await update.message.reply_text(
-            'Пожалуйста, выберите цвет из клавиатуры.',
-            reply_markup=ReplyKeyboardMarkup(color_keyboard, one_time_keyboard=True)
+            "Пожалуйста, выберите цвет кнопкой 👇",
+            reply_markup=ReplyKeyboardMarkup(color_buttons, one_time_keyboard=True, resize_keyboard=True)
         )
         return COLOR
 
-    context.user_data['color'] = color_mapping[color]
+    context.user_data["color"] = reverse_colors[color_text]
 
+    # ВСЕ КУЗОВА: берем сразу из BODY_TYPE_CHOICES, чтобы показывались все варианты
+    body_buttons = chunk([v for _, v in Car.BODY_TYPE_CHOICES], 2)
     await update.message.reply_text(
-        'Отлично! Теперь выберите тип кузова:',
-        reply_markup=ReplyKeyboardMarkup(body_keyboard, one_time_keyboard=True)
+        "📦 Выберите тип кузова:",
+        reply_markup=ReplyKeyboardMarkup(body_buttons, one_time_keyboard=True, resize_keyboard=True)
     )
     return BODY_TYPE
 
-
+# ===== BODY_TYPE HANDLER =====
 async def body_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    body_mapping = {
-        'седан': 'sedan',
-        'внедорожник': 'suv',
-        'хэтчбек': 'hatchback',
-        'купе': 'coupe',
-        'минивэн': 'minivan'
-    }
+    body_text = (update.message.text or "").strip().lower()
+    reverse_bodies = {v.lower(): k for k, v in Car.BODY_TYPE_CHOICES}
 
-    body_type = update.message.text.lower()
-    if body_type not in body_mapping:
+    if body_text not in reverse_bodies:
+        body_buttons = chunk([v for _, v in Car.BODY_TYPE_CHOICES], 2)
         await update.message.reply_text(
-            'Пожалуйста, выберите тип кузова из клавиатуры.',
-            reply_markup=ReplyKeyboardMarkup(body_keyboard, one_time_keyboard=True)
+            "Пожалуйста, выберите тип кузова кнопкой 👇",
+            reply_markup=ReplyKeyboardMarkup(body_buttons, one_time_keyboard=True, resize_keyboard=True)
         )
         return BODY_TYPE
 
-    context.user_data['body_type'] = body_mapping[body_type]
+    context.user_data["body_type"] = reverse_bodies[body_text]
 
+    # Кнопки для цен
+    price_buttons = [[f"{low}-{high}$"] for low, high in PRICE_RANGES]
     await update.message.reply_text(
-        'Отлично! Теперь выберите ценовой диапазон:',
-        reply_markup=ReplyKeyboardMarkup(price_keyboard, one_time_keyboard=True)
+        "💰 Выберите диапазон цен:",
+        reply_markup=ReplyKeyboardMarkup(price_buttons, one_time_keyboard=True, resize_keyboard=True)
     )
     return PRICE_RANGE
 
-
+# ===== PRICE_RANGE HANDLER =====
 async def price_range_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    price_range = update.message.text
-    if price_range not in price_ranges:
-        await update.message.reply_text(
-            'Пожалуйста, выберите ценовой диапазон из клавиатуры.',
-            reply_markup=ReplyKeyboardMarkup(price_keyboard, one_time_keyboard=True)
-        )
+    raw = (update.message.text or "").strip()
+    try:
+        clean = raw.replace("$", "").replace(" ", "")
+        low_s, high_s = clean.split("-")
+        low, high = int(low_s), int(high_s)
+    except Exception:
+        await update.message.reply_text("Введите корректный диапазон (например: 20000-30000$)")
         return PRICE_RANGE
 
-    context.user_data['price_range'] = price_range
-
-    # Сначала убираем клавиатуру
-    await update.message.reply_text(
-        'Ищем подходящие автомобили... 🔍',
-        reply_markup=ReplyKeyboardRemove()
+    cars = await sync_to_async(list)(
+        Car.objects.filter(
+            condition=context.user_data["condition"],
+            color=context.user_data["color"],
+            body_type=context.user_data["body_type"],
+            price__gte=low,
+            price__lte=high
+        )
     )
-
-    # Поиск подходящих автомобилей
-    condition = context.user_data['condition']
-    color = context.user_data['color']
-    body_type = context.user_data['body_type']
-
-    cars = await sync_to_async(list)(Car.objects.filter(
-        condition=condition,
-        color=color,
-        body_type=body_type,
-        price_range=price_range
-    ))
 
     if not cars:
         await update.message.reply_text(
-            'К сожалению, по вашим критериям ничего не найдено. 😔\n\n'
-            'Попробуйте изменить параметры поиска.\n'
-            'Введите /start чтобы начать заново.'
+            "К сожалению, по вашим критериям ничего не найдено 😔\n\n"
+            "Введите /start, чтобы попробовать снова.",
+            reply_markup=ReplyKeyboardRemove()
         )
         return ConversationHandler.END
 
-    # Отправляем результаты
     for car in cars:
-        message = (
-            f'🚗 *{car.name}*\n'
-            f'💎 Состояние: {car.get_condition_display()}\n'
-            f'🎨 Цвет: {car.get_color_display()}\n'
-            f'📦 Кузов: {car.get_body_type_display()}\n'
-            f'💰 Цена: {car.price_range}\n'
-            f'📝 {car.description}'
+        msg = (
+            f"🚗 *{car.name}*\n"
+            f"💎 Состояние: {car.get_condition_display()}\n"
+            f"🎨 Цвет: {car.get_color_display()}\n"
+            f"📦 Кузов: {car.get_body_type_display()}\n"
+            f"💰 Цена: {car.price}$\n"
+            f"📝 {car.description}"
         )
-
-        # Если есть фото - отправляем фото с подписью
         if car.image_url:
-            await update.message.reply_photo(
-                photo=car.image_url,
-                caption=message,
-                parse_mode='Markdown'
-            )
+            await update.message.reply_photo(photo=car.image_url, caption=msg, parse_mode="Markdown")
         else:
-            # Если фото нет - отправляем только текст
-            await update.message.reply_text(message, parse_mode='Markdown')
+            await update.message.reply_text(msg, parse_mode="Markdown")
 
-    await update.message.reply_text(
-        'Поиск завершен! 🎉\n'
-        'Введите /start чтобы начать новый поиск.'
-    )
+    await update.message.reply_text("Поиск завершен 🎉\nВведите /start для нового поиска.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
-
+# ===== CANCEL =====
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        'Поиск отменен. Если хотите начать заново, введите /start',
+        "Поиск отменён. Введите /start для новой попытки.",
         reply_markup=ReplyKeyboardRemove()
     )
     return ConversationHandler.END
 
-
+# ===== SETUP BOT =====
 def setup_bot():
     application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[CommandHandler("start", start)],
         states={
             CONDITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, condition_handler)],
             COLOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, color_handler)],
             BODY_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, body_type_handler)],
             PRICE_RANGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, price_range_handler)],
         },
-        fallbacks=[CommandHandler('cancel', cancel)]
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     application.add_handler(conv_handler)
