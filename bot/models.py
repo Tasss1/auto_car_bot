@@ -26,10 +26,27 @@ class Car(models.Model):
     condition = models.CharField(max_length=10, choices=CONDITION_CHOICES)
     color = models.CharField(max_length=10, choices=COLOR_CHOICES)
     body_type = models.CharField(max_length=15, choices=BODY_TYPE_CHOICES)
-    price = models.IntegerField()  # 👈 число вместо строки
+    price = models.IntegerField()
     name = models.CharField(max_length=100)
     description = models.TextField()
-    image_url = models.URLField('Ссылка на фото', blank=True, null=True)
+
+    # Фото (до 5)
+    image_url1 = models.URLField('Фото 1', blank=True, null=True)
+    image_url2 = models.URLField('Фото 2', blank=True, null=True)
+    image_url3 = models.URLField('Фото 3', blank=True, null=True)
+    image_url4 = models.URLField('Фото 4', blank=True, null=True)
+    image_url5 = models.URLField('Фото 5', blank=True, null=True)
+
+    # Видео
+    video_url = models.URLField('Видео', blank=True, null=True)
 
     def __str__(self):
         return f"{self.name} ({self.get_condition_display()} - {self.price}$)"
+
+    def get_all_images(self):
+        """Вернуть список всех фото"""
+        return [url for url in [
+            self.image_url1, self.image_url2,
+            self.image_url3, self.image_url4,
+            self.image_url5
+        ] if url]

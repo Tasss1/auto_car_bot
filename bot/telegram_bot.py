@@ -1,6 +1,9 @@
 import os
 import django
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import (
+    Update, ReplyKeyboardMarkup, ReplyKeyboardRemove,
+    InputMediaPhoto, InputFile
+)
 from asgiref.sync import sync_to_async
 from telegram.ext import (
     Application, CommandHandler, ConversationHandler,
@@ -27,9 +30,11 @@ PRICE_RANGES = [
     (40000, 60000),
 ]
 
+
 def chunk(lst, n):
     """Разбить список на строки по n элементов для клавиатуры."""
     return [lst[i:i + n] for i in range(0, len(lst), n)]
+
 
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41,6 +46,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return CONDITION
 
+
 # ===== CONDITION HANDLER =====
 async def condition_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip().lower()
@@ -50,13 +56,13 @@ async def condition_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["condition"] = "new" if text == "новый" else "used"
 
-    # Кнопки с цветами
     color_buttons = chunk([v for _, v in Car.COLOR_CHOICES], 2)
     await update.message.reply_text(
         "🎨 Выберите цвет:",
         reply_markup=ReplyKeyboardMarkup(color_buttons, one_time_keyboard=True, resize_keyboard=True)
     )
     return COLOR
+
 
 # ===== COLOR HANDLER =====
 async def color_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,13 +79,13 @@ async def color_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["color"] = reverse_colors[color_text]
 
-    # ВСЕ КУЗОВА: берем сразу из BODY_TYPE_CHOICES, чтобы показывались все варианты
     body_buttons = chunk([v for _, v in Car.BODY_TYPE_CHOICES], 2)
     await update.message.reply_text(
         "📦 Выберите тип кузова:",
         reply_markup=ReplyKeyboardMarkup(body_buttons, one_time_keyboard=True, resize_keyboard=True)
     )
     return BODY_TYPE
+
 
 # ===== BODY_TYPE HANDLER =====
 async def body_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96,13 +102,13 @@ async def body_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["body_type"] = reverse_bodies[body_text]
 
-    # Кнопки для цен
     price_buttons = [[f"{low}-{high}$"] for low, high in PRICE_RANGES]
     await update.message.reply_text(
         "💰 Выберите диапазон цен:",
         reply_markup=ReplyKeyboardMarkup(price_buttons, one_time_keyboard=True, resize_keyboard=True)
     )
     return PRICE_RANGE
+
 
 # ===== PRICE_RANGE HANDLER =====
 async def price_range_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -142,13 +148,45 @@ async def price_range_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"💰 Цена: {car.price}$\n"
             f"📝 {car.description}"
         )
-        if car.image_url:
-            await update.message.reply_photo(photo=car.image_url, caption=msg, parse_mode="Markdown")
+
+        images = car.get_all_images()  # должен возвращать пути или URL
+        media_group = []
+
+        for i, img_path in enumerate(images):
+            # Если путь локальный
+            full_path = os.path.join(settings.BASE_DIR, img_path)
+            if os.path.exists(full_path):
+                if i == 0:
+                    media_group.append(InputMediaPhoto(InputFile(full_path), caption=msg, parse_mode="Markdown"))
+                else:
+                    media_group.append(InputMediaPhoto(InputFile(full_path)))
+            # Если это прямой URL (например через MEDIA_URL)
+            else:
+                if i == 0:
+                    media_group.append(InputMediaPhoto(img_path, caption=msg, parse_mode="Markdown"))
+                else:
+                    media_group.append(InputMediaPhoto(img_path))
+
+        if media_group:
+            await update.message.reply_media_group(media=media_group)
         else:
             await update.message.reply_text(msg, parse_mode="Markdown")
 
-    await update.message.reply_text("Поиск завершен 🎉\nВведите /start для нового поиска.", reply_markup=ReplyKeyboardRemove())
+        # Видео
+        if car.video_url:
+            video_path = os.path.join(settings.BASE_DIR, car.video_url)
+            if os.path.exists(video_path):
+                await update.message.reply_video(video=InputFile(video_path), caption="🎥 Видео автомобиля")
+            else:
+                # Если видео URL
+                await update.message.reply_video(video=car.video_url, caption="🎥 Видео автомобиля")
+
+    await update.message.reply_text(
+        "Поиск завершен 🎉\nВведите /start для нового поиска.",
+        reply_markup=ReplyKeyboardRemove()
+    )
     return ConversationHandler.END
+
 
 # ===== CANCEL =====
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -157,6 +195,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardRemove()
     )
     return ConversationHandler.END
+
 
 # ===== SETUP BOT =====
 def setup_bot():
